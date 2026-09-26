@@ -1,0 +1,7 @@
+fastapi[standard]
+strawberry-graphql[fastapi]
+sqlalchemy
+alembic
+pymysql
+cryptography
+passlib[bcrypt]

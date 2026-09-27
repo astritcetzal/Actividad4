@@ -90,6 +90,14 @@ class CreateCompanyAdminInput:
     email: str
     password: str
 
+
+@strawberry.input
+class CreateCompanyUserInput:
+    companyId: strawberry.ID
+    name: str
+    email: str
+    password: str
+
 @strawberry.type
 class AuthUser:
     id: strawberry.ID
@@ -102,6 +110,147 @@ class AuthPayload:
     token: str
     tokenType: str
     user: AuthUser
+
+
+def _company_graphql(empresa_db) -> Company:
+    return Company(
+        id=empresa_db.id,
+        name=empresa_db.name,
+        legalName=empresa_db.legalName,
+        taxId=empresa_db.taxId,
+        email=empresa_db.email,
+        phone=empresa_db.phone,
+        isActive=empresa_db.isActive,
+        createdAt=empresa_db.createdAt,
+        updatedAt=empresa_db.updatedAt,
+    )
+
+
+def _user_graphql(usuario_db) -> User:
+    return User(
+        id=usuario_db.id,
+        name=usuario_db.name,
+        email=usuario_db.email,
+        emailVerified=usuario_db.emailVerified,
+        isActive=usuario_db.isActive,
+        createdAt=usuario_db.createdAt,
+        updatedAt=usuario_db.updatedAt,
+    )
+
+
+def _company_user_graphql(relacion, empresa_db, usuario_db) -> CompanyUser:
+    return CompanyUser(
+        id=relacion.id,
+        companyId=relacion.companyId,
+        userId=relacion.userId,
+        isAdmin=relacion.isAdmin,
+        isActive=relacion.isActive,
+        joinedAt=relacion.joinedAt,
+        company=_company_graphql(empresa_db),
+        user=_user_graphql(usuario_db),
+    )
+
+
+def registrar_usuario_en_empresa(
+    db,
+    company_id,
+    name: str,
+    email: str,
+    password: str,
+    es_admin: bool,
+) -> CompanyUser:
+    """Crea un usuario y lo vincula a una empresa."""
+
+    name = name.strip()
+    email = email.strip().lower()
+
+    if not name:
+        raise Exception(
+            "El nombre del usuario es obligatorio."
+        )
+
+    if not validate_email(email):
+        raise Exception(
+            "El correo electrónico no tiene un formato válido."
+        )
+
+    if not password:
+        raise Exception(
+            "La contraseña es obligatoria."
+        )
+
+    empresa_db = (
+        db.query(CompanyModel)
+        .filter(CompanyModel.id == company_id)
+        .first()
+    )
+
+    if not empresa_db:
+        raise Exception(
+            "La empresa especificada no existe."
+        )
+
+    if es_admin:
+        admin_existente = (
+            db.query(CompanyUserModel)
+            .filter(
+                CompanyUserModel.companyId == empresa_db.id,
+                CompanyUserModel.isAdmin == True,
+                CompanyUserModel.isActive == True,
+            )
+            .first()
+        )
+
+        if admin_existente:
+            raise Exception(
+                "La empresa ya tiene un administrador principal."
+            )
+
+    usuario_existente = (
+        db.query(UserModel)
+        .filter(UserModel.email == email)
+        .first()
+    )
+
+    if usuario_existente:
+        raise Exception(
+            "El correo electrónico ya está registrado."
+        )
+
+    ahora = datetime.now(timezone.utc)
+
+    nuevo_usuario = UserModel(
+        name=name,
+        email=email,
+        passwordHash=hash_password(password),
+        emailVerified=False,
+        isActive=True,
+        createdAt=ahora,
+        updatedAt=ahora,
+    )
+
+    db.add(nuevo_usuario)
+    db.flush()
+
+    nueva_relacion = CompanyUserModel(
+        companyId=empresa_db.id,
+        userId=nuevo_usuario.id,
+        isAdmin=es_admin,
+        isActive=True,
+        joinedAt=ahora,
+    )
+
+    db.add(nueva_relacion)
+    db.commit()
+    db.refresh(nuevo_usuario)
+    db.refresh(nueva_relacion)
+
+    return _company_user_graphql(
+        nueva_relacion,
+        empresa_db,
+        nuevo_usuario,
+    )
+
 
 @strawberry.type
 class Query:
@@ -168,6 +317,41 @@ class Query:
             createdAt=empresa_db.createdAt,
             updatedAt=empresa_db.updatedAt
         )
+
+    @strawberry.field
+    def companyUsers(
+        self,
+        info: Info,
+        companyId: strawberry.ID,
+    ) -> List[CompanyUser]:
+
+        db = info.context["db"]
+
+        empresa_db = (
+            db.query(CompanyModel)
+            .filter(CompanyModel.id == companyId)
+            .first()
+        )
+
+        if not empresa_db:
+            raise Exception(
+                "La empresa especificada no existe."
+            )
+
+        relaciones = (
+            db.query(CompanyUserModel)
+            .filter(CompanyUserModel.companyId == empresa_db.id)
+            .all()
+        )
+
+        return [
+            _company_user_graphql(
+                relacion,
+                empresa_db,
+                relacion.user,
+            )
+            for relacion in relaciones
+        ]
 
 @strawberry.type
 class Mutation:
@@ -324,116 +508,60 @@ class Mutation:
         input: CreateCompanyAdminInput
     ) -> CompanyUser:
 
+        return registrar_usuario_en_empresa(
+            db=info.context["db"],
+            company_id=input.companyId,
+            name=input.name,
+            email=input.email,
+            password=input.password,
+            es_admin=True,
+        )
+
+    @strawberry.field
+    def createCompanyUser(
+        self,
+        info: Info,
+        input: CreateCompanyUserInput
+    ) -> CompanyUser:
+
+        return registrar_usuario_en_empresa(
+            db=info.context["db"],
+            company_id=input.companyId,
+            name=input.name,
+            email=input.email,
+            password=input.password,
+            es_admin=False,
+        )
+
+    @strawberry.field
+    def deactivateCompanyUser(
+        self,
+        info: Info,
+        id: strawberry.ID
+    ) -> CompanyUser:
+
         db = info.context["db"]
 
-        name = input.name.strip()
-        email = input.email.strip().lower()
-
-        if not name:
-            raise Exception(
-                "El nombre del usuario es obligatorio."
-            )
-
-        if not validate_email(email):
-            raise Exception(
-                "El correo electrónico no tiene un formato válido."
-            )
-
-        if not input.password:
-            raise Exception(
-                "La contraseña es obligatoria."
-            )
-
-        empresa_db = (
-            db.query(CompanyModel)
-            .filter(
-                CompanyModel.id == input.companyId
-            )
+        relacion = (
+            db.query(CompanyUserModel)
+            .filter(CompanyUserModel.id == id)
             .first()
         )
 
-        if not empresa_db:
+        if not relacion:
             raise Exception(
-                "La empresa especificada no existe."
+                "El usuario de la empresa no existe."
             )
 
-        usuario_existente = (
-            db.query(UserModel)
-            .filter(
-                UserModel.email == email
-            )
-            .first()
-        )
-
-        if usuario_existente:
-            raise Exception(
-                "El correo electrónico ya está registrado."
-            )
-
-        password_hash = hash_password(
-            input.password
-        )
-
-        ahora = datetime.now(timezone.utc)
-
-        nuevo_usuario = UserModel(
-            name=name,
-            email=email,
-            passwordHash=password_hash,
-            emailVerified=False,
-            isActive=True,
-            createdAt=ahora,
-            updatedAt=ahora
-        )
-
-        db.add(nuevo_usuario)
-
-        db.flush()
-
-        nueva_relacion = CompanyUserModel(
-            companyId=empresa_db.id,
-            userId=nuevo_usuario.id,
-            isAdmin=True,
-            isActive=True,
-            joinedAt=ahora
-        )
-
-        db.add(nueva_relacion)
+        relacion.isActive = False
 
         db.commit()
+        db.refresh(relacion)
 
-        db.refresh(nuevo_usuario)
-        db.refresh(nueva_relacion)
-
-        return CompanyUser(
-            id=nueva_relacion.id,
-            companyId=nueva_relacion.companyId,
-            userId=nueva_relacion.userId,
-            isAdmin=nueva_relacion.isAdmin,
-            isActive=nueva_relacion.isActive,
-            joinedAt=nueva_relacion.joinedAt,
-
-            company=Company(
-                id=empresa_db.id,
-                name=empresa_db.name,
-                legalName=empresa_db.legalName,
-                taxId=empresa_db.taxId,
-                email=empresa_db.email,
-                phone=empresa_db.phone,
-                isActive=empresa_db.isActive,
-                createdAt=empresa_db.createdAt,
-                updatedAt=empresa_db.updatedAt
-            ),
-
-            user=User(
-                id=nuevo_usuario.id,
-                name=nuevo_usuario.name,
-                email=nuevo_usuario.email,
-                emailVerified=nuevo_usuario.emailVerified,
-                isActive=nuevo_usuario.isActive,
-                createdAt=nuevo_usuario.createdAt,
-                updatedAt=nuevo_usuario.updatedAt
-            )
+        return _company_user_graphql(
+            relacion,
+            relacion.company,
+            relacion.user,
         )
 
     @strawberry.field

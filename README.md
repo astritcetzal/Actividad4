@@ -1,6 +1,6 @@
 # Sistema General de Ingresos
 
-Actividad 3 de desarrollo backend. API GraphQL para registrar empresas y los usuarios que pertenecen a cada una.
+Actividad 4 de desarrollo backend. API GraphQL para registrar empresas y los usuarios que pertenecen a cada una.
 
 La empresa es la raíz del dominio. Un usuario no guarda la empresa dentro de su propio registro: la relación vive en `CompanyUser`, para que más adelante una persona pueda pertenecer a varias empresas.
 

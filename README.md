@@ -10,7 +10,7 @@ La empresa es la raíz del dominio. Un usuario no guarda la empresa dentro de su
 |---|---|---|
 | 1 | Astrit Cetzal | Empresas: modelo, esquema GraphQL y operaciones de alta, consulta, actualización y desactivación |
 | 2 | Venus Semino | Identidad: `User`, `CompanyUser`, hash de contraseña, validación de correo, `createCompanyAdmin` y `login` |
-| 3 | Reglas de negocio y control de calidad | `createCompanyUser`, `deactivateCompanyUser`, `companyUsers`, un solo administrador principal por empresa y pruebas de los casos de error |
+| 3 | Giovana Díaz | Reglas de negocio y control de calidad:  `createCompanyUser`, `deactivateCompanyUser`, `companyUsers`, un solo administrador principal por empresa y pruebas de los casos de error |
 
 ## Tecnologías
 

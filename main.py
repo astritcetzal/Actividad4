@@ -1,9 +1,12 @@
 import strawberry
+
 from typing import Optional, List
 from datetime import datetime, timezone
+
 from fastapi import FastAPI, Depends
 from strawberry.fastapi import GraphQLRouter
 from strawberry.types import Info
+
 from database import get_db
 
 from models import (
@@ -15,7 +18,8 @@ from models import (
 from security import (
     hash_password,
     verify_password,
-    validate_email
+    validate_email,
+    create_access_token
 )
 
 @strawberry.type
@@ -30,6 +34,7 @@ class Company:
     createdAt: datetime
     updatedAt: datetime
 
+
 @strawberry.type
 class User:
     id: strawberry.ID
@@ -39,6 +44,7 @@ class User:
     isActive: bool
     createdAt: datetime
     updatedAt: datetime
+
 
 @strawberry.type
 class CompanyUser:
@@ -76,6 +82,7 @@ class LoginInput:
     email: str
     password: str
 
+
 @strawberry.input
 class CreateCompanyAdminInput:
     companyId: strawberry.ID
@@ -88,6 +95,7 @@ class AuthUser:
     id: strawberry.ID
     name: str
     email: str
+
 
 @strawberry.type
 class AuthPayload:
@@ -226,6 +234,7 @@ class Mutation:
             )
 
         if input.name is not None:
+
             if not input.name.strip():
                 raise Exception(
                     "El nombre de la empresa no puede estar vacío."
@@ -275,6 +284,7 @@ class Mutation:
     ) -> Company:
 
         db = info.context["db"]
+
         empresa_db = (
             db.query(CompanyModel)
             .filter(CompanyModel.id == id)
@@ -287,6 +297,7 @@ class Mutation:
             )
 
         empresa_db.isActive = False
+
         empresa_db.updatedAt = datetime.now(
             timezone.utc
         )
@@ -364,6 +375,7 @@ class Mutation:
         )
 
         ahora = datetime.now(timezone.utc)
+
         nuevo_usuario = UserModel(
             name=name,
             email=email,
@@ -375,7 +387,9 @@ class Mutation:
         )
 
         db.add(nuevo_usuario)
+
         db.flush()
+
         nueva_relacion = CompanyUserModel(
             companyId=empresa_db.id,
             userId=nuevo_usuario.id,
@@ -385,7 +399,9 @@ class Mutation:
         )
 
         db.add(nueva_relacion)
+
         db.commit()
+
         db.refresh(nuevo_usuario)
         db.refresh(nueva_relacion)
 
@@ -420,15 +436,74 @@ class Mutation:
             )
         )
 
+    @strawberry.field
+    def login(
+        self,
+        info: Info,
+        input: LoginInput
+    ) -> AuthPayload:
+
+        db = info.context["db"]
+        email = input.email.strip().lower()
+
+        if not validate_email(email):
+            raise Exception(
+                "El correo electrónico no tiene un formato válido."
+            )
+
+        usuario_db = (
+            db.query(UserModel)
+            .filter(
+                UserModel.email == email
+            )
+            .first()
+        )
+
+        if not usuario_db:
+            raise Exception(
+                "Correo electrónico o contraseña incorrectos."
+            )
+
+        if not usuario_db.isActive:
+            raise Exception(
+                "El usuario está desactivado."
+            )
+
+        if not verify_password(
+            input.password,
+            usuario_db.passwordHash
+        ):
+            raise Exception(
+                "Correo electrónico o contraseña incorrectos."
+            )
+
+        token = create_access_token(
+            user_id=usuario_db.id,
+            email=usuario_db.email
+        )
+
+        return AuthPayload(
+            token=token,
+            tokenType="Bearer",
+            user=AuthUser(
+                id=usuario_db.id,
+                name=usuario_db.name,
+                email=usuario_db.email
+            )
+        )
+
 schema = strawberry.Schema(
     query=Query,
     mutation=Mutation
 )
 
-async def get_context(db=Depends(get_db)):
+async def get_context(
+    db=Depends(get_db)
+):
     return {
         "db": db
     }
+
 
 graphql_app = GraphQLRouter(
     schema,
@@ -438,6 +513,7 @@ graphql_app = GraphQLRouter(
 app = FastAPI(
     title="Sistema General de Ingresos"
 )
+
 
 app.include_router(
     graphql_app,

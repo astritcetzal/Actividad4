@@ -5,3 +5,4 @@ alembic
 pymysql
 cryptography
 passlib[bcrypt]
+python-jose[cryptography]
